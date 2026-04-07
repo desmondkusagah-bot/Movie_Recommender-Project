@@ -6,15 +6,24 @@ import random
 import firebase_admin
 from firebase_admin import credentials, auth, firestore
 from streamlit_lottie import st_lottie
+import json  # Added for secrets processing
 
 # --- 1. FIREBASE INITIALIZATION ---
 if not firebase_admin._apps:
-    cred = credentials.Certificate('serviceAccountKey.json')
+    # Check if we are running in Streamlit Cloud (using Secrets)
+    if "firebase" in st.secrets:
+        # This converts the text block you pasted in Secrets into a dictionary
+        secret_dict = json.loads(st.secrets["firebase"]["service_account"])
+        cred = credentials.Certificate(secret_dict)
+    else:
+        # This runs when you are working locally on your PC
+        cred = credentials.Certificate('serviceAccountKey.json')
+        
     firebase_admin.initialize_app(cred)
 
 db = firestore.client()
 
-# --- 2. PAGE CONFIGURATION [cite: 22] ---
+# --- 2. PAGE CONFIGURATION ---
 st.set_page_config(
     page_title="CineMatch AI | Group 6",
     page_icon="🎬",
@@ -46,6 +55,7 @@ def get_movie_details(movie_id):
         res = requests.get(url).json()
         poster_path = res.get('poster_path')
         poster = "https://image.tmdb.org/t/p/w500" + poster_path if poster_path else "https://via.placeholder.com/500x750"
+        # Adjusted for Ghana (GH) as requested in your setup
         providers = res.get('watch/providers', {}).get('results', {}).get('GH', {}).get('flatrate', [])
         p_names = [p['provider_name'] for p in providers] if providers else ["Rental/Cinema Only"]
         return poster, p_names
@@ -102,7 +112,7 @@ def login_screen():
                 except Exception as ex: st.error(ex)
         st.markdown('</div>', unsafe_allow_html=True)
 
-# --- 6. DATA LOADING [cite: 22] ---
+# --- 6. DATA LOADING ---
 @st.cache_resource(show_spinner=False)
 def load_data():
     movies = pd.DataFrame(pickle.load(open('movie_dict.pkl', 'rb')))
