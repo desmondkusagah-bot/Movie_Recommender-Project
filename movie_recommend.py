@@ -6,19 +6,15 @@ import random
 import firebase_admin
 from firebase_admin import credentials, auth, firestore
 from streamlit_lottie import st_lottie
-import json  # Added for secrets processing
+import json 
 
 # --- 1. FIREBASE INITIALIZATION ---
 if not firebase_admin._apps:
-    # Check if we are running in Streamlit Cloud (using Secrets)
     if "firebase" in st.secrets:
-        # This converts the text block you pasted in Secrets into a dictionary
         secret_dict = json.loads(st.secrets["firebase"]["service_account"])
         cred = credentials.Certificate(secret_dict)
     else:
-        # This runs when you are working locally on your PC
         cred = credentials.Certificate('serviceAccountKey.json')
-        
     firebase_admin.initialize_app(cred)
 
 db = firestore.client()
@@ -55,7 +51,6 @@ def get_movie_details(movie_id):
         res = requests.get(url).json()
         poster_path = res.get('poster_path')
         poster = "https://image.tmdb.org/t/p/w500" + poster_path if poster_path else "https://via.placeholder.com/500x750"
-        # Adjusted for Ghana (GH) as requested in your setup
         providers = res.get('watch/providers', {}).get('results', {}).get('GH', {}).get('flatrate', [])
         p_names = [p['provider_name'] for p in providers] if providers else ["Rental/Cinema Only"]
         return poster, p_names
@@ -93,16 +88,32 @@ def login_screen():
         st.markdown("<p style='text-align: center; color: #ccc;'>GROUP 6 PREMIUM SOLUTION</p>", unsafe_allow_html=True)
         if lottie_movie: st_lottie(lottie_movie, height=200)
         t1, t2 = st.tabs(["🔐 Login", "📝 Sign Up"])
+        
         with t1:
             e = st.text_input("Email", placeholder="your@email.com", key="l_e")
             p = st.text_input("Password", type="password", key="l_p")
             if st.button("SIGN IN", use_container_width=True):
+                # --- UPDATED LOGIN FIX ---
+                # Using Firebase Auth REST API to verify password
+                firebase_web_api_key = "AIzaSyCyZ9aCtchLZyejKzTRjbSDnNp8uu9o1RI" # Ensure this is your FIREBASE Web API Key
+                auth_url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={firebase_web_api_key}"
+                
                 try:
-                    user = auth.get_user_by_email(e)
-                    st.session_state.user_auth = True
-                    st.session_state.u_id, st.session_state.u_name = user.uid, user.display_name
-                    st.rerun()
-                except: st.error("Login Failed. Check your credentials.")
+                    payload = {"email": e, "password": p, "returnSecureToken": True}
+                    res = requests.post(auth_url, json=payload)
+                    
+                    if res.status_code == 200:
+                        user_data = res.json()
+                        user_info = auth.get_user(user_data['localId'])
+                        st.session_state.user_auth = True
+                        st.session_state.u_id = user_data['localId']
+                        st.session_state.u_name = user_info.display_name if user_info.display_name else e.split('@')[0]
+                        st.rerun()
+                    else:
+                        st.error("Login Failed. Please check your email and password.")
+                except Exception as ex:
+                    st.error("An error occurred during login. Please try again.")
+        
         with t2:
             ne, nu, np = st.text_input("Email", key="s_e"), st.text_input("Username", key="s_u"), st.text_input("Password", type="password", key="s_p")
             if st.button("CREATE ACCOUNT", use_container_width=True):
@@ -125,7 +136,7 @@ movies, similarity = load_data()
 if not st.session_state.user_auth:
     login_screen()
 else:
-    # --- SIDEBAR  ---
+    # --- SIDEBAR ---
     with st.sidebar:
         try: st.image("logo.jpg", width=250)
         except: pass
@@ -137,8 +148,11 @@ else:
         st.markdown("---")
         theme = st.select_slider("App Vibe:", options=["Classic Light", "Netflix Dark"], value="Netflix Dark")
         st.subheader("📜 Recent Favorites")
-        hist = db.collection('favorites').document(st.session_state.u_id).collection('movies').limit(5).stream()
-        for d in hist: st.caption(f"⭐ {d.to_dict()['title']}")
+        try:
+            hist = db.collection('favorites').document(st.session_state.u_id).collection('movies').limit(5).stream()
+            for d in hist: st.caption(f"⭐ {d.to_dict()['title']}")
+        except: st.caption("No favorites yet.")
+        
         st.markdown("---")
         st.info("Engine: Cosine Similarity")
         st.write("Developed by: **ML26_JAN_GROUP_6**")
@@ -170,7 +184,7 @@ else:
     with col_in:
         selected_movie = st.selectbox('Select a movie you liked:', movies['title'].values)
     with col_luck:
-        st.write("") # Padding
+        st.write("") 
         if st.button('🎲 Surprise Me', use_container_width=True):
             selected_movie = random.choice(movies['title'].values)
             st.toast(f"Picked: {selected_movie}")
