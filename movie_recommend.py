@@ -124,13 +124,17 @@ def login_screen():
         st.markdown('</div>', unsafe_allow_html=True)
 
 # --- 6. DATA LOADING ---
+# --- 6. DATA LOADING ---
 @st.cache_resource(show_spinner=False)
 def load_data():
     movies = pd.DataFrame(pickle.load(open('movie_dict.pkl', 'rb')))
     similarity = pickle.load(open('similarity.pkl', 'rb'))
+    
+    # THIS LINE WILL SHOW US THE NAMES ON THE LIVE WEBSITE
+    st.error(f"DEBUG: Your columns are: {movies.columns.tolist()}")
+    st.stop() # This pauses the app so you can read the names
+    
     return movies, similarity
-
-movies, similarity = load_data()
 
 # --- 7. MAIN APP LOGIC ---
 if not st.session_state.user_auth:
