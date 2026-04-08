@@ -33,12 +33,13 @@ if 'recs' not in st.session_state:
     st.session_state.recs = []
 if 'last_choice' not in st.session_state:
     st.session_state.last_choice = ""
+if 'u_name' not in st.session_state:
+    st.session_state.u_name = "User"
 
 # --- 4. ASSET & API HELPERS ---
 TMDB_API_KEY = "9a17b2be2c5c6caeba84998a102f7cde"
 
 def get_movie_details(movie_id):
-    # Ensure movie_id is a valid integer/string for the API
     url = f"https://api.themoviedb.org/3/movie/{movie_id}?api_key={TMDB_API_KEY}"
     try:
         res = requests.get(url, timeout=10).json()
@@ -90,19 +91,31 @@ def login_screen():
             e = st.text_input("Email", placeholder="your@email.com", key="l_e")
             p = st.text_input("Password", type="password", key="l_p")
             if st.button("SIGN IN", use_container_width=True):
-                with st.spinner("Connecting..."):
+                with st.spinner("Authenticating..."):
                     firebase_web_api_key = "AIzaSyCyZ9aCtchLZyejKzTRjbSDnNp8uu9o1RI"
                     auth_url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={firebase_web_api_key}"
                     try:
                         res = requests.post(auth_url, json={"email": e, "password": p, "returnSecureToken": True}, timeout=15)
                         if res.status_code == 200:
                             user_data = res.json()
+                            # Fetch user details to get the custom display name
+                            user_info = auth.get_user(user_data['localId'])
                             st.session_state.user_auth = True
                             st.session_state.u_id = user_data['localId']
-                            st.session_state.u_name = e.split('@')[0]
+                            st.session_state.u_name = user_info.display_name if user_info.display_name else e.split('@')[0]
                             st.rerun()
-                        else: st.error("Authentication failed. Check details.")
-                    except: st.warning("Server took too long. Please try one more time.")
+                        else:
+                            st.error("Invalid email or password.")
+                    except Exception as ex:
+                        st.error(f"Login Error: {str(ex)}")
+
+        with t2:
+            ne, nu, np = st.text_input("Email", key="s_e"), st.text_input("Username", key="s_u"), st.text_input("Password", type="password", key="s_p")
+            if st.button("CREATE ACCOUNT", use_container_width=True):
+                try:
+                    user = auth.create_user(email=ne, password=np, display_name=nu)
+                    st.success(f"Account Created for {user.display_name}! Please Login.")
+                except Exception as ex: st.error(ex)
 
 # --- 6. DATA LOADING ---
 @st.cache_resource(show_spinner=False)
@@ -119,43 +132,57 @@ if not st.session_state.user_auth:
 else:
     # --- SIDEBAR ---
     with st.sidebar:
-        try: st.image("logo.jpg", width=200)
-        except: st.markdown("<h1 style='text-align: center;'>🎬</h1>", unsafe_allow_html=True)
+        try:
+            st.image("logo.jpg", width=200)
+        except:
+            st.markdown("<h1 style='text-align: center;'>🎬</h1>", unsafe_allow_html=True)
         
         st.markdown("<h2 style='text-align: center; color: #E50914;'>GROUP 6 SOLUTION</h2>", unsafe_allow_html=True)
         st.write(f"Welcome, **{st.session_state.u_name}**")
         st.markdown("---")
         
+        # --- THEME SECTION ---
+        st.subheader("🎨 Customization")
+        theme = st.selectbox("Choose Theme:", ["Netflix Dark", "Classic Light", "Ocean Blue", "Midnight Purple"])
+        
+        st.markdown("---")
         # Strategy Toggle
         st.subheader("⚙️ AI Strategy")
         rec_mode = st.radio("Engine Mode:", ["Content-Based", "Collaborative"])
         
         st.markdown("---")
-        # RESTORED FAVORITES LIST
-        st.subheader("❤️ Favorites History")
+        # Favorites List
+        st.subheader("❤️ Favorites")
         try:
             favs = db.collection('favorites').document(st.session_state.u_id).collection('movies').limit(5).stream()
             for f in favs: st.caption(f"⭐ {f.to_dict()['title']}")
-        except: st.caption("No favorites saved yet.")
+        except: st.caption("No favorites yet.")
 
         st.markdown("---")
         if st.button("🚪 Sign Out", use_container_width=True):
             st.session_state.user_auth = False
             st.rerun()
 
+    # --- THEME ENGINE ---
+    themes = {
+        "Netflix Dark": ("#111", "white", "#E50914"),
+        "Classic Light": ("white", "black", "#0078ff"),
+        "Ocean Blue": ("#001f3f", "white", "#0074D9"),
+        "Midnight Purple": ("#1a0033", "white", "#b300b3")
+    }
+    bg, txt, btn = themes[theme]
+    st.markdown(f"<style>.stApp {{ background: {bg}; color: {txt}; }} .stButton>button {{ background: {btn}; color: white; border-radius: 20px; }}</style>", unsafe_allow_html=True)
+
     # --- TABS ---
     tab_discovery, tab_ai, tab_watchlist = st.tabs(["🔥 Discovery", "🔍 AI Recommender", "🔖 Watchlist"])
 
     with tab_discovery:
         st.title("Top Picks")
-        
-        # FIXED POSTERS FOR DISCOVERY
         st.subheader("Popular in Ghana 🇬🇭")
         gh_movies = get_popular_ghana()
         cols_gh = st.columns(6)
         for i, m in enumerate(gh_movies):
             with cols_gh[i]:
-                # Use standard TMDB path directly for efficiency in Discovery
                 st.image(f"https://image.tmdb.org/t/p/w500{m['poster_path']}")
                 st.caption(m['title'])
         
@@ -170,11 +197,11 @@ else:
 
     with tab_ai:
         st.title("AI Recommender")
-        selected_movie = st.selectbox('Choose a movie:', movies['title'].values)
+        selected_movie = st.selectbox('Choose a movie you liked:', movies['title'].values)
         
         c1, c2, c3 = st.columns(3)
         with c1:
-            if st.button('✨ Get Recommendations', use_container_width=True):
+            if st.button('✨ Generate Recommendations', use_container_width=True):
                 if rec_mode == "Content-Based":
                     idx = movies[movies['title'] == selected_movie].index[0]
                     dist = sorted(list(enumerate(similarity[idx])), reverse=True, key=lambda x: x[1])
@@ -185,14 +212,12 @@ else:
                 st.rerun()
         
         with c2:
-            # RESTORED SAVE TO FAVORITES
             if st.button('❤️ Save to Favorites', use_container_width=True):
                 m_data = movies[movies['title'] == selected_movie].iloc[0]
                 db.collection('favorites').document(st.session_state.u_id).collection('movies').document(str(m_data.movie_id)).set({'title': selected_movie, 'id': int(m_data.movie_id)})
-                st.toast("Saved to Favorites!")
+                st.toast("Saved!")
 
         with c3:
-            # RESTORED EXPORT CSV
             if st.session_state.recs:
                 csv = convert_df(st.session_state.recs)
                 st.download_button("📥 Export List", csv, "recommendations.csv", "text/csv", use_container_width=True)
