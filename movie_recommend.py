@@ -133,7 +133,7 @@ else:
     # --- SIDEBAR ---
     with st.sidebar:
         try:
-            st.image("logo.jpg", width=230)
+            st.image("logo.jpg", width=235)
         except:
             st.markdown("<h1 style='text-align: center;'>🎬</h1>", unsafe_allow_html=True)
         
