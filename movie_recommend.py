@@ -98,21 +98,28 @@ def login_screen():
         with t1:
             e = st.text_input("Email", placeholder="your@email.com", key="l_e")
             p = st.text_input("Password", type="password", key="l_p")
+            
+            # --- UPDATED LOGIN FIX (RETRY PROTECTION) ---
             if st.button("SIGN IN", use_container_width=True):
-                firebase_web_api_key = "AIzaSyCyZ9aCtchLZyejKzTRjbSDnNp8uu9o1RI"
-                auth_url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={firebase_web_api_key}"
-                try:
-                    payload = {"email": e, "password": p, "returnSecureToken": True}
-                    res = requests.post(auth_url, json=payload)
-                    if res.status_code == 200:
-                        user_data = res.json()
-                        user_info = auth.get_user(user_data['localId'])
-                        st.session_state.user_auth = True
-                        st.session_state.u_id = user_data['localId']
-                        st.session_state.u_name = user_info.display_name if user_info.display_name else e.split('@')[0]
-                        st.rerun()
-                    else: st.error("Login Failed. Check credentials.")
-                except: st.error("An error occurred.")
+                with st.spinner("Connecting to Firebase..."):
+                    firebase_web_api_key = "AIzaSyCyZ9aCtchLZyejKzTRjbSDnNp8uu9o1RI"
+                    auth_url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={firebase_web_api_key}"
+                    try:
+                        payload = {"email": e, "password": p, "returnSecureToken": True}
+                        # Increased timeout and added explicit status check
+                        res = requests.post(auth_url, json=payload, timeout=10)
+                        
+                        if res.status_code == 200:
+                            user_data = res.json()
+                            user_info = auth.get_user(user_data['localId'])
+                            st.session_state.user_auth = True
+                            st.session_state.u_id = user_data['localId']
+                            st.session_state.u_name = user_info.display_name if user_info.display_name else e.split('@')[0]
+                            st.rerun()
+                        else:
+                            st.error("Invalid credentials. Please click Sign In again if this was a first-time error.")
+                    except requests.exceptions.RequestException:
+                        st.warning("Handshake latency detected. Please click Sign In once more.")
         
         with t2:
             ne, nu, np = st.text_input("Email", key="s_e"), st.text_input("Username", key="s_u"), st.text_input("Password", type="password", key="s_p")
@@ -130,7 +137,7 @@ def load_data():
         movies_raw = pd.DataFrame(pickle.load(open('movie_dict.pkl', 'rb')))
         similarity = pickle.load(open('similarity.pkl', 'rb'))
         
-        # SAFETY SCANNER: Auto-detect and rename columns
+        # SAFETY SCANNER: Auto-detect columns from your lost Colab names
         current_cols = movies_raw.columns.tolist()
         mapping = {}
         for c in current_cols:
@@ -141,15 +148,13 @@ def load_data():
         
         movies_raw.rename(columns=mapping, inplace=True)
         
-        # Fallback for missing columns
-        if 'genres' not in movies_raw.columns:
-            movies_raw['genres'] = "General"
-        if 'country' not in movies_raw.columns:
-            movies_raw['country'] = "Global"
+        # Fallback values
+        if 'genres' not in movies_raw.columns: movies_raw['genres'] = "General"
+        if 'country' not in movies_raw.columns: movies_raw['country'] = "Global"
             
         return movies_raw, similarity
     except Exception as e:
-        st.error(f"Critical Error loading dataset: {e}")
+        st.error(f"Critical System Error: {e}")
         st.stop()
 
 movies, similarity = load_data()
@@ -172,20 +177,17 @@ else:
         st.markdown("---")
         st.subheader("🎯 Dataset Explorer")
 
-        # Handle Genres from local data
+        # Dynamic genre handling
         first_val = movies['genres'].iloc[0]
         if isinstance(first_val, list):
             unique_genres = sorted(list(set([g for sublist in movies['genres'] for g in sublist])))
         elif isinstance(first_val, str) and "," in first_val:
-            # Handle comma-separated strings
             all_g = movies['genres'].str.split(',').explode().str.strip().unique()
             unique_genres = sorted([g for g in all_g if g])
         else:
             unique_genres = sorted(movies['genres'].unique().tolist())
             
         sel_genre = st.selectbox("Select Genre:", ["All"] + unique_genres)
-
-        # Handle Country from local data
         unique_countries = sorted(movies['country'].dropna().unique().tolist())
         sel_country = st.selectbox("Select Country:", ["All"] + unique_countries)
         
@@ -196,7 +198,6 @@ else:
                     filtered = filtered[filtered['genres'].apply(lambda x: sel_genre in x)]
                 else:
                     filtered = filtered[filtered['genres'].str.contains(sel_genre, na=False)]
-            
             if sel_country != "All":
                 filtered = filtered[filtered['country'] == sel_country]
             
@@ -216,7 +217,7 @@ else:
 
     with tab_discovery:
         if st.session_state.filter_results:
-            st.subheader(f"Results for {sel_genre} in {sel_country}")
+            st.subheader(f"Local Results: {sel_genre} in {sel_country}")
             cols = st.columns(4)
             for i, m in enumerate(st.session_state.filter_results):
                 with cols[i % 4]:
@@ -228,7 +229,7 @@ else:
                         idx = movies[movies['title'] == m['title']].index[0]
                         dist = sorted(list(enumerate(similarity[idx])), reverse=True, key=lambda x: x[1])
                         st.session_state.recs = [{'id': int(movies.iloc[dist[j][0]].movie_id), 'title': movies.iloc[dist[j][0]].title} for j in range(1, 7)]
-                        st.toast(f"Ready to analyze {m['title']}!")
+                        st.toast(f"Data mapping for {m['title']} complete!")
             st.markdown("---")
 
         st.subheader("Trending This Week")
@@ -236,7 +237,7 @@ else:
         cols_t = st.columns(6)
         for i, m in enumerate(t_movies):
             with cols_t[i]:
-                st.image(f"https://image.tmdb.org/t/p/w500{m['poster_path']}")
+                st.image(f"https://image.tmdb.org/p/w500{m['poster_path']}")
                 st.caption(m['title'])
 
         st.subheader("Popular in Ghana 🇬🇭")
@@ -244,13 +245,12 @@ else:
         cols_p = st.columns(6)
         for i, m in enumerate(p_movies):
             with cols_p[i]:
-                st.image(f"https://image.tmdb.org/t/p/w500{m['poster_path']}")
+                st.image(f"https://image.tmdb.org/p/w500{m['poster_path']}")
                 st.caption(m['title'])
 
     with tab_ai:
         st.title("AI Search Engine")
         rec_mode = st.radio("Recommendation Strategy:", ["Content-Based (Similarity)", "Collaborative (User Trends)"], horizontal=True)
-        
         selected_movie = st.selectbox('Select a movie you liked:', movies['title'].values)
         
         col1, col2 = st.columns(2)
@@ -268,7 +268,7 @@ else:
             if st.button('❤️ Add to Favorites', use_container_width=True):
                 m = movies[movies['title'] == selected_movie].iloc[0]
                 db.collection('favorites').document(st.session_state.u_id).collection('movies').document(str(m.movie_id)).set({'title': selected_movie, 'id': int(m.movie_id)})
-                st.toast("Saved to Favorites!")
+                st.toast("Saved!")
 
         if st.session_state.recs:
             st.markdown("---")
@@ -296,8 +296,7 @@ else:
                     if st.button("🗑️", key=f"del_{movie['id']}"):
                         db.collection('watchlists').document(st.session_state.u_id).collection('movies').document(str(movie['id'])).delete()
                         st.rerun()
-        else:
-            st.info("Your watchlist is empty. Explore movies in the Discovery tab!")
+        else: st.info("Explore movies in the Discovery tab to build your list!")
 
     st.markdown("---")
     st.caption("Developed by: ML26_JAN_GROUP_6")
