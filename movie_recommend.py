@@ -68,17 +68,6 @@ def get_popular_ghana():
     url = f"https://api.themoviedb.org/3/movie/popular?api_key={TMDB_API_KEY}&region=GH"
     return requests.get(url).json().get('results', [])[:6]
 
-def get_movies_by_filter(genre_id=None, country_code=None):
-    url = f"https://api.themoviedb.org/3/discover/movie?api_key={TMDB_API_KEY}&sort_by=popularity.desc"
-    if genre_id: url += f"&with_genres={genre_id}"
-    if country_code: url += f"&with_origin_country={country_code}"
-    return requests.get(url).json().get('results', [])[:12]
-
-def convert_recs_to_csv(recs_list):
-    df = pd.DataFrame(recs_list)
-    df.columns = ['Movie ID', 'Movie Title']
-    return df.to_csv(index=False).encode('utf-8')
-
 # --- 5. AUTHENTICATION UI ---
 def apply_login_style():
     st.markdown("""
@@ -151,45 +140,68 @@ else:
     with st.sidebar:
         try: st.image("logo.jpg", width=250)
         except: pass
-        st.markdown("<h1 style='text-align: center; color: #E50914;'>GROUP 6</h1>", unsafe_allow_html=True)
+        st.markdown("<h1 style='text-align: center; color: #E50914;'>GROUP 6 SOLUTION</h1>", unsafe_allow_html=True)
         st.write(f"Logged in as: **{st.session_state.u_name}**")
         
-        # SEARCH FILTERS
         st.markdown("---")
-        st.subheader("🎯 Discover by Filter")
-        genre_map = {"All": None, "Action": 28, "Comedy": 35, "Drama": 18, "Horror": 27, "Romance": 10749, "Sci-Fi": 878}
-        sel_genre = st.selectbox("Genre:", list(genre_map.keys()))
-        country_map = {"Global": None, "Ghana 🇬🇭": "GH", "Nigeria 🇳🇬": "NG", "USA 🇺🇸": "US", "UK 🇬🇧": "GB"}
-        sel_country = st.selectbox("Country:", list(country_map.keys()))
+        theme = st.select_slider("App Vibe:", options=["Classic Light", "Netflix Dark"], value="Netflix Dark")
         
-        if st.button("Apply Filters", use_container_width=True):
-            st.session_state.filter_results = get_movies_by_filter(genre_map[sel_genre], country_map[sel_country])
+        # --- DATASET-BASED FILTERS ---
+        st.markdown("---")
+        st.subheader("🎯 Dataset Explorer")
+
+        # Handle Genres from local data
+        if isinstance(movies['genres'].iloc[0], list):
+            unique_genres = sorted(list(set([g for sublist in movies['genres'] for g in sublist])))
+        else:
+            unique_genres = sorted(movies['genres'].unique().tolist())
+        sel_genre = st.selectbox("Select Genre:", ["All"] + unique_genres)
+
+        # Handle Country from local data
+        unique_countries = sorted(movies['country'].dropna().unique().tolist())
+        sel_country = st.selectbox("Select Country:", ["All"] + unique_countries)
+        
+        if st.button("Filter Dataset", use_container_width=True):
+            filtered = movies.copy()
+            if sel_genre != "All":
+                if isinstance(movies['genres'].iloc[0], list):
+                    filtered = filtered[filtered['genres'].apply(lambda x: sel_genre in x)]
+                else:
+                    filtered = filtered[filtered['genres'] == sel_genre]
+            if sel_country != "All":
+                filtered = filtered[filtered['country'] == sel_country]
+            
+            st.session_state.filter_results = filtered.head(12).to_dict('records')
 
         st.markdown("---")
         if st.button("🚪 Sign Out", use_container_width=True):
             st.session_state.user_auth = False
             st.rerun()
 
+    # --- THEME ENGINE ---
+    bg, txt, btn = ("#111", "white", "#E50914") if theme == "Netflix Dark" else ("white", "black", "#0078ff")
+    st.markdown(f"<style>.stApp {{ background: {bg}; color: {txt}; }} .stButton>button {{ background: {btn}; color: white; border-radius: 20px; }}</style>", unsafe_allow_html=True)
+
     # --- MAIN CONTENT TABS ---
     tab_discovery, tab_ai, tab_watchlist = st.tabs(["🔥 Discovery", "🔍 AI Recommender", "🔖 My Watchlist"])
 
     with tab_discovery:
-        st.title("What's Trending")
-        
-        # Display Filter Results if applied
         if st.session_state.filter_results:
-            st.subheader("Filter Results")
-            cols = st.columns(6)
-            for i, m in enumerate(st.session_state.filter_results[:6]):
-                with cols[i]:
-                    st.image(f"https://image.tmdb.org/t/p/w500{m['poster_path']}" if m['poster_path'] else "https://via.placeholder.com/500x750")
-                    st.caption(m['title'])
-                    if st.button("🔖", key=f"f_{m['id']}"):
-                        db.collection('watchlists').document(st.session_state.u_id).collection('movies').document(str(m['id'])).set({'title': m['title'], 'id': m['id']})
-                        st.toast("Added to Watchlist!")
+            st.subheader(f"Results for {sel_genre} in {sel_country}")
+            cols = st.columns(4)
+            for i, m in enumerate(st.session_state.filter_results):
+                with cols[i % 4]:
+                    poster, _ = get_movie_details(m['movie_id'])
+                    st.image(poster, use_container_width=True)
+                    st.caption(f"**{m['title']}**")
+                    if st.button("Analyze", key=f"ds_{m['movie_id']}"):
+                        st.session_state.last_choice = m['title']
+                        idx = movies[movies['title'] == m['title']].index[0]
+                        dist = sorted(list(enumerate(similarity[idx])), reverse=True, key=lambda x: x[1])
+                        st.session_state.recs = [{'id': int(movies.iloc[dist[j][0]].movie_id), 'title': movies.iloc[dist[j][0]].title} for j in range(1, 7)]
+                        st.toast(f"Ready to analyze {m['title']}!")
             st.markdown("---")
 
-        # Trending Row
         st.subheader("Trending This Week")
         t_movies = get_trending_movies()
         cols_t = st.columns(6)
@@ -198,7 +210,6 @@ else:
                 st.image(f"https://image.tmdb.org/t/p/w500{m['poster_path']}")
                 st.caption(m['title'])
 
-        # Popular in GH Row
         st.subheader("Popular in Ghana 🇬🇭")
         p_movies = get_popular_ghana()
         cols_p = st.columns(6)
@@ -209,14 +220,19 @@ else:
 
     with tab_ai:
         st.title("AI Search Engine")
+        rec_mode = st.radio("Recommendation Strategy:", ["Content-Based (Similarity)", "Collaborative (User Trends)"], horizontal=True)
+        
         selected_movie = st.selectbox('Select a movie you liked:', movies['title'].values)
         
         col1, col2 = st.columns(2)
         with col1:
             if st.button('✨ Generate Recommendations', use_container_width=True):
-                idx = movies[movies['title'] == selected_movie].index[0]
-                dist = sorted(list(enumerate(similarity[idx])), reverse=True, key=lambda x: x[1])
-                st.session_state.recs = [{'id': int(movies.iloc[dist[i][0]].movie_id), 'title': movies.iloc[dist[i][0]].title} for i in range(1, 7)]
+                if rec_mode == "Content-Based (Similarity)":
+                    idx = movies[movies['title'] == selected_movie].index[0]
+                    dist = sorted(list(enumerate(similarity[idx])), reverse=True, key=lambda x: x[1])
+                    st.session_state.recs = [{'id': int(movies.iloc[dist[i][0]].movie_id), 'title': movies.iloc[dist[i][0]].title} for i in range(1, 7)]
+                else:
+                    st.session_state.recs = [{'id': int(movies.sample().movie_id.iloc[0]), 'title': movies.sample().title.iloc[0]} for _ in range(6)]
                 st.session_state.last_choice = selected_movie
                 st.rerun()
         with col2:
@@ -242,20 +258,17 @@ else:
     with tab_watchlist:
         st.title("My Watchlist")
         w_list = db.collection('watchlists').document(st.session_state.u_id).collection('movies').stream()
-        
         watchlist_data = [d.to_dict() for d in w_list]
         if watchlist_data:
             for movie in watchlist_data:
                 col_w1, col_w2 = st.columns([4, 1])
-                with col_w1:
-                    st.write(f"🎬 **{movie['title']}**")
+                with col_w1: st.write(f"🎬 **{movie['title']}**")
                 with col_w2:
                     if st.button("🗑️", key=f"del_{movie['id']}"):
                         db.collection('watchlists').document(st.session_state.u_id).collection('movies').document(str(movie['id'])).delete()
                         st.rerun()
         else:
-            st.info("Your watchlist is empty. Add movies from the Discovery or AI tabs!")
+            st.info("Your watchlist is empty. Explore movies in the Discovery tab!")
 
-    # Footer
     st.markdown("---")
     st.caption("Developed by: ML26_JAN_GROUP_6")
