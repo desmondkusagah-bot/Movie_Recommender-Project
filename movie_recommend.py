@@ -123,18 +123,36 @@ def login_screen():
                 except Exception as ex: st.error(ex)
         st.markdown('</div>', unsafe_allow_html=True)
 
-# --- 6. DATA LOADING ---
-# --- 6. DATA LOADING ---
+# --- 6. DATA LOADING WITH SAFETY SCANNER ---
 @st.cache_resource(show_spinner=False)
 def load_data():
-    movies = pd.DataFrame(pickle.load(open('movie_dict.pkl', 'rb')))
-    similarity = pickle.load(open('similarity.pkl', 'rb'))
-    
-    # THIS LINE WILL SHOW US THE NAMES ON THE LIVE WEBSITE
-    st.error(f"DEBUG: Your columns are: {movies.columns.tolist()}")
-    st.stop() # This pauses the app so you can read the names
-    
-    return movies, similarity
+    try:
+        movies_raw = pd.DataFrame(pickle.load(open('movie_dict.pkl', 'rb')))
+        similarity = pickle.load(open('similarity.pkl', 'rb'))
+        
+        # SAFETY SCANNER: Auto-detect and rename columns
+        current_cols = movies_raw.columns.tolist()
+        mapping = {}
+        for c in current_cols:
+            if c.lower() in ['genre', 'genres', 'movie_genres', 'tags']:
+                mapping[c] = 'genres'
+            if c.lower() in ['country', 'origin_country', 'countries']:
+                mapping[c] = 'country'
+        
+        movies_raw.rename(columns=mapping, inplace=True)
+        
+        # Fallback for missing columns
+        if 'genres' not in movies_raw.columns:
+            movies_raw['genres'] = "General"
+        if 'country' not in movies_raw.columns:
+            movies_raw['country'] = "Global"
+            
+        return movies_raw, similarity
+    except Exception as e:
+        st.error(f"Critical Error loading dataset: {e}")
+        st.stop()
+
+movies, similarity = load_data()
 
 # --- 7. MAIN APP LOGIC ---
 if not st.session_state.user_auth:
@@ -155,10 +173,16 @@ else:
         st.subheader("🎯 Dataset Explorer")
 
         # Handle Genres from local data
-        if isinstance(movies['genres'].iloc[0], list):
+        first_val = movies['genres'].iloc[0]
+        if isinstance(first_val, list):
             unique_genres = sorted(list(set([g for sublist in movies['genres'] for g in sublist])))
+        elif isinstance(first_val, str) and "," in first_val:
+            # Handle comma-separated strings
+            all_g = movies['genres'].str.split(',').explode().str.strip().unique()
+            unique_genres = sorted([g for g in all_g if g])
         else:
             unique_genres = sorted(movies['genres'].unique().tolist())
+            
         sel_genre = st.selectbox("Select Genre:", ["All"] + unique_genres)
 
         # Handle Country from local data
@@ -171,7 +195,8 @@ else:
                 if isinstance(movies['genres'].iloc[0], list):
                     filtered = filtered[filtered['genres'].apply(lambda x: sel_genre in x)]
                 else:
-                    filtered = filtered[filtered['genres'] == sel_genre]
+                    filtered = filtered[filtered['genres'].str.contains(sel_genre, na=False)]
+            
             if sel_country != "All":
                 filtered = filtered[filtered['country'] == sel_country]
             
