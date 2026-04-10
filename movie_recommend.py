@@ -2,7 +2,6 @@ import streamlit as st
 import pickle
 import pandas as pd
 import requests
-import random
 import firebase_admin
 from firebase_admin import credentials, auth, firestore
 import json 
@@ -46,9 +45,9 @@ def get_movie_details(movie_id):
         poster_path = res.get('poster_path')
         if poster_path:
             return "https://image.tmdb.org/t/p/w500" + poster_path
-        return "https://via.placeholder.com/500x750?text=Poster+Not+Found"
+        return "https://via.placeholder.com/500x750?text=No+Poster"
     except:
-        return "https://via.placeholder.com/500x750?text=Connection+Error"
+        return "https://via.placeholder.com/500x750?text=Error"
 
 def get_trending_movies():
     url = f"https://api.themoviedb.org/3/trending/movie/week?api_key={TMDB_API_KEY}"
@@ -57,10 +56,6 @@ def get_trending_movies():
 def get_popular_ghana():
     url = f"https://api.themoviedb.org/3/movie/popular?api_key={TMDB_API_KEY}&region=GH"
     return requests.get(url).json().get('results', [])[:6]
-
-def convert_df(recs_list):
-    df = pd.DataFrame(recs_list)
-    return df.to_csv(index=False).encode('utf-8')
 
 # --- 5. AUTHENTICATION UI ---
 def apply_login_style():
@@ -98,23 +93,20 @@ def login_screen():
                         res = requests.post(auth_url, json={"email": e, "password": p, "returnSecureToken": True}, timeout=15)
                         if res.status_code == 200:
                             user_data = res.json()
-                            # Fetch user details to get the custom display name
                             user_info = auth.get_user(user_data['localId'])
                             st.session_state.user_auth = True
                             st.session_state.u_id = user_data['localId']
                             st.session_state.u_name = user_info.display_name if user_info.display_name else e.split('@')[0]
                             st.rerun()
-                        else:
-                            st.error("Invalid email or password.")
-                    except Exception as ex:
-                        st.error(f"Login Error: {str(ex)}")
+                        else: st.error("Invalid credentials.")
+                    except: st.warning("Connection lag. Please try again.")
 
         with t2:
             ne, nu, np = st.text_input("Email", key="s_e"), st.text_input("Username", key="s_u"), st.text_input("Password", type="password", key="s_p")
             if st.button("CREATE ACCOUNT", use_container_width=True):
                 try:
-                    user = auth.create_user(email=ne, password=np, display_name=nu)
-                    st.success(f"Account Created for {user.display_name}! Please Login.")
+                    auth.create_user(email=ne, password=np, display_name=nu)
+                    st.success(f"Account Created for {nu}! Please Login.")
                 except Exception as ex: st.error(ex)
 
 # --- 6. DATA LOADING ---
@@ -132,31 +124,34 @@ if not st.session_state.user_auth:
 else:
     # --- SIDEBAR ---
     with st.sidebar:
-        try:
-            st.image("logo.jpg", width=235)
-        except:
-            st.markdown("<h1 style='text-align: center;'>🎬</h1>", unsafe_allow_html=True)
+        try: st.image("logo.jpg", width=240)
+        except: st.markdown("<h1 style='text-align: center;'>🎬</h1>", unsafe_allow_html=True)
         
         st.markdown("<h2 style='text-align: center; color: #E50914;'>GROUP 6 SOLUTION</h2>", unsafe_allow_html=True)
         st.write(f"Welcome, **{st.session_state.u_name}**")
         st.markdown("---")
         
-        # --- THEME SECTION ---
-        st.subheader("🎨 Customization")
-        theme = st.selectbox("Choose Theme:", ["Netflix Dark", "Classic Light", "Ocean Blue", "Midnight Purple"])
+        # Theme & Strategy
+        theme = st.selectbox("Theme:", ["Netflix Dark", "Classic Light", "Ocean Blue"])
+        rec_mode = st.radio("AI Strategy:", ["Content-Based", "Collaborative"])
         
         st.markdown("---")
-        # Strategy Toggle
-        st.subheader("⚙️ AI Strategy")
-        rec_mode = st.radio("Engine Mode:", ["Content-Based", "Collaborative"])
+        # DATASET FILTER SECTION
+        st.subheader("🎯 Dataset Filter")
+        gen_list = ["All"] + sorted(movies['genre_label'].unique().tolist())
+        con_list = ["All"] + sorted(movies['country_label'].unique().tolist())
         
-        st.markdown("---")
-        # Favorites List
-        st.subheader("❤️ Favorites")
-        try:
-            favs = db.collection('favorites').document(st.session_state.u_id).collection('movies').limit(5).stream()
-            for f in favs: st.caption(f"⭐ {f.to_dict()['title']}")
-        except: st.caption("No favorites yet.")
+        sel_gen = st.selectbox("By Genre:", gen_list)
+        sel_con = st.selectbox("By Country:", con_list)
+        
+        # Filter logic for the search box
+        filtered_movies = movies.copy()
+        if sel_gen != "All":
+            filtered_movies = filtered_movies[filtered_movies['genre_label'] == sel_gen]
+        if sel_con != "All":
+            filtered_movies = filtered_movies[filtered_movies['country_label'] == sel_con]
+        
+        st.caption(f"Matches: {len(filtered_movies)}")
 
         st.markdown("---")
         if st.button("🚪 Sign Out", use_container_width=True):
@@ -164,12 +159,7 @@ else:
             st.rerun()
 
     # --- THEME ENGINE ---
-    themes = {
-        "Netflix Dark": ("#111", "white", "#E50914"),
-        "Classic Light": ("white", "black", "#0078ff"),
-        "Ocean Blue": ("#001f3f", "white", "#0074D9"),
-        "Midnight Purple": ("#1a0033", "white", "#b300b3")
-    }
+    themes = {"Netflix Dark": ("#111", "white", "#E50914"), "Classic Light": ("white", "black", "#0078ff"), "Ocean Blue": ("#001f3f", "white", "#0074D9")}
     bg, txt, btn = themes[theme]
     st.markdown(f"<style>.stApp {{ background: {bg}; color: {txt}; }} .stButton>button {{ background: {btn}; color: white; border-radius: 20px; }}</style>", unsafe_allow_html=True)
 
@@ -177,8 +167,7 @@ else:
     tab_discovery, tab_ai, tab_watchlist = st.tabs(["🔥 Discovery", "🔍 AI Recommender", "🔖 Watchlist"])
 
     with tab_discovery:
-        st.title("Top Picks")
-        st.subheader("Popular in Ghana 🇬🇭")
+        st.title("Popular in Ghana 🇬🇭")
         gh_movies = get_popular_ghana()
         cols_gh = st.columns(6)
         for i, m in enumerate(gh_movies):
@@ -197,11 +186,12 @@ else:
 
     with tab_ai:
         st.title("AI Recommender")
-        selected_movie = st.selectbox('Choose a movie you liked:', movies['title'].values)
+        # Search box uses the filtered list from the sidebar
+        selected_movie = st.selectbox('Pick a movie you liked:', filtered_movies['title'].values)
         
         c1, c2, c3 = st.columns(3)
         with c1:
-            if st.button('✨ Generate Recommendations', use_container_width=True):
+            if st.button('✨ Get Recommendations', use_container_width=True):
                 if rec_mode == "Content-Based":
                     idx = movies[movies['title'] == selected_movie].index[0]
                     dist = sorted(list(enumerate(similarity[idx])), reverse=True, key=lambda x: x[1])
@@ -219,13 +209,12 @@ else:
 
         with c3:
             if st.session_state.recs:
-                csv = convert_df(st.session_state.recs)
-                st.download_button("📥 Export List", csv, "recommendations.csv", "text/csv", use_container_width=True)
-            else:
-                st.button("📥 Export List", disabled=True, use_container_width=True)
+                df = pd.DataFrame(st.session_state.recs)
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button("📥 Export List", csv, "recs.csv", "text/csv", use_container_width=True)
 
         if st.session_state.recs:
-            st.markdown(f"### Results for '{st.session_state.last_choice}'")
+            st.markdown(f"### Results based on '{st.session_state.last_choice}'")
             cols_ai = st.columns(3)
             for i, item in enumerate(st.session_state.recs):
                 with cols_ai[i % 3]:
