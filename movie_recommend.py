@@ -57,7 +57,7 @@ def get_popular_ghana():
     url = f"https://api.themoviedb.org/3/movie/popular?api_key={TMDB_API_KEY}&region=GH"
     return requests.get(url).json().get('results', [])[:6]
 
-# --- 5. AUTHENTICATION UI (UPDATED FOR FIRST-CLICK FIX) ---
+# --- 5. AUTHENTICATION UI (FIRST-CLICK FIX) ---
 def apply_login_style():
     st.markdown("""
         <style>
@@ -82,31 +82,27 @@ def login_screen():
         st.markdown("<h1 style='text-align: center;'>🎬 CineMatch AI</h1>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #ccc;'>GROUP 6 PREMIUM SOLUTION</p>", unsafe_allow_html=True)
         t1, t2 = st.tabs(["🔐 Login", "📝 Sign Up"])
-        
         with t1:
             e = st.text_input("Email", placeholder="your@email.com", key="l_e")
             p = st.text_input("Password", type="password", key="l_p")
-            status_container = st.empty()
-            
+            status = st.empty()
             if st.button("SIGN IN", use_container_width=True):
-                with st.spinner("Authenticating..."):
-                    firebase_web_api_key = "AIzaSyCyZ9aCtchLZyejKzTRjbSDnNp8uu9o1RI"
-                    auth_url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={firebase_web_api_key}"
+                with st.spinner("Connecting..."):
+                    fb_key = "AIzaSyCyZ9aCtchLZyejKzTRjbSDnNp8uu9o1RI"
+                    url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={fb_key}"
                     try:
-                        res = requests.post(auth_url, json={"email": e, "password": p, "returnSecureToken": True}, timeout=20)
+                        res = requests.post(url, json={"email": e, "password": p, "returnSecureToken": True}, timeout=20)
                         if res.status_code == 200:
-                            user_data = res.json()
-                            # Immediate retrieval of correct display name
-                            user_record = auth.get_user(user_data['localId'])
-                            st.session_state.user_auth = True
-                            st.session_state.u_id = user_data['localId']
-                            st.session_state.u_name = user_record.display_name if user_record.display_name else e.split('@')[0]
+                            data = res.json()
+                            user = auth.get_user(data['localId'])
+                            st.session_state.update({
+                                "user_auth": True,
+                                "u_id": data['localId'],
+                                "u_name": user.display_name if user.display_name else e.split('@')[0]
+                            })
                             st.rerun()
-                        else:
-                            status_container.error("Invalid credentials. Please try again.")
-                    except:
-                        status_container.warning("Connection lag. Streamlining login...")
-                        st.rerun()
+                        else: status.error("Invalid credentials.")
+                    except: st.rerun() # Silent retry for first-click fix
 
         with t2:
             ne, nu, np = st.text_input("Email", key="s_e"), st.text_input("Username", key="s_u"), st.text_input("Password", type="password", key="s_p")
@@ -116,11 +112,14 @@ def login_screen():
                     st.success(f"Account Created for {nu}! Please Login.")
                 except Exception as ex: st.error(ex)
 
-# --- 6. DATA LOADING ---
+# --- 6. DATA LOADING (EXACT NAMES MAPPED) ---
 @st.cache_resource(show_spinner=False)
 def load_data():
     movies = pd.DataFrame(pickle.load(open('movie_dict.pkl', 'rb')))
     similarity = pickle.load(open('similarity.pkl', 'rb'))
+    # Standardize the 'id' column for the rest of the app logic
+    if 'id' in movies.columns:
+        movies.rename(columns={'id': 'movie_id'}, inplace=True)
     return movies, similarity
 
 movies, similarity = load_data()
@@ -129,45 +128,38 @@ movies, similarity = load_data()
 if not st.session_state.user_auth:
     login_screen()
 else:
-    # --- SIDEBAR ---
     with st.sidebar:
         try: st.image("logo.jpg", width=250)
         except: st.markdown("<h1 style='text-align: center;'>🎬</h1>", unsafe_allow_html=True)
-        
         st.markdown("<h2 style='text-align: center; color: #E50914;'>GROUP 6 SOLUTION</h2>", unsafe_allow_html=True)
-        st.write(f"Welcome back, **{st.session_state.u_name}**")
+        st.write(f"Logged in as: **{st.session_state.u_name}**")
         st.markdown("---")
-        
-        theme = st.selectbox("App Theme:", ["Netflix Dark", "Classic Light", "Ocean Blue"])
-        rec_mode = st.radio("AI Engine Mode:", ["Content-Based", "Collaborative"])
-        
+        theme = st.selectbox("Theme:", ["Netflix Dark", "Classic Light", "Ocean Blue"])
+        rec_mode = st.radio("Strategy:", ["Content-Based", "Collaborative"])
         st.markdown("---")
         if st.button("🚪 Sign Out", use_container_width=True):
             st.session_state.user_auth = False
             st.rerun()
 
-    # --- THEME ENGINE ---
+    # Theme Engine
     themes = {"Netflix Dark": ("#111", "white", "#E50914"), "Classic Light": ("white", "black", "#0078ff"), "Ocean Blue": ("#001f3f", "white", "#0074D9")}
     bg, txt, btn = themes[theme]
     st.markdown(f"<style>.stApp {{ background: {bg}; color: {txt}; }} .stButton>button {{ background: {btn}; color: white; border-radius: 20px; }}</style>", unsafe_allow_html=True)
 
-    # --- MAIN CONTENT TABS (5 TABS) ---
+    # Tabs (5 Total)
     tab_discovery, tab_genres, tab_countries, tab_ai, tab_watchlist = st.tabs([
         "🔥 Discovery", "🎭 Genres", "🌍 Countries", "🔍 AI Recommender", "🔖 Watchlist"
     ])
 
     with tab_discovery:
-        st.title("Top Global Picks")
-        st.subheader("Popular in Ghana 🇬🇭")
+        st.title("Popular & Trending")
         gh_movies = get_popular_ghana()
         cols_gh = st.columns(6)
         for i, m in enumerate(gh_movies):
             with cols_gh[i]:
                 st.image(f"https://image.tmdb.org/t/p/w500{m['poster_path']}")
                 st.caption(f"**{m['title']}**")
-        
         st.markdown("---")
-        st.subheader("Trending This Week")
         tr_movies = get_trending_movies()
         cols_tr = st.columns(6)
         for i, m in enumerate(tr_movies):
@@ -176,49 +168,43 @@ else:
                 st.caption(f"**{m['title']}**")
 
     with tab_genres:
-        st.title("Browse by Genre")
+        st.title("Explore Genres")
         g_list = sorted(movies['genre_label'].unique().tolist())
-        sel_g = st.selectbox("Select Genre:", g_list)
-        
+        sel_g = st.selectbox("Pick Genre:", g_list)
         filtered_g = movies[movies['genre_label'] == sel_g].head(24)
         cols_g = st.columns(4)
         for i, m in enumerate(filtered_g.to_dict('records')):
             with cols_g[i % 4]:
-                poster = get_movie_details(m['movie_id'])
-                st.image(poster, use_container_width=True)
-                st.caption(f"**{m['title']}**")
-                if st.button("Analyze", key=f"gen_{m['movie_id']}"):
+                st.image(get_movie_details(m['movie_id']))
+                st.caption(m['title'])
+                if st.button("Analyze", key=f"g_{m['movie_id']}"):
                     st.session_state.last_choice = m['title']
-                    st.toast(f"Locked on: {m['title']}")
+                    st.toast(f"Locked onto {m['title']}!")
 
     with tab_countries:
         st.title("World Cinema")
         c_list = sorted(movies['country_label'].unique().tolist())
-        sel_c = st.selectbox("Select Origin Country:", c_list)
-        
+        sel_c = st.selectbox("Pick Country:", c_list)
         filtered_c = movies[movies['country_label'] == sel_c].head(24)
         cols_c = st.columns(4)
         for i, m in enumerate(filtered_c.to_dict('records')):
             with cols_c[i % 4]:
-                poster = get_movie_details(m['movie_id'])
-                st.image(poster, use_container_width=True)
-                st.caption(f"**{m['title']}**")
-                if st.button("Analyze", key=f"con_{m['movie_id']}"):
+                st.image(get_movie_details(m['movie_id']))
+                st.caption(m['title'])
+                if st.button("Analyze", key=f"c_{m['movie_id']}"):
                     st.session_state.last_choice = m['title']
-                    st.toast(f"Locked on: {m['title']}")
+                    st.toast(f"Locked onto {m['title']}!")
 
     with tab_ai:
-        st.title("AI Search & Recommendations")
-        movie_list = movies['title'].values
-        default_ix = 0
-        if st.session_state.last_choice in movie_list:
-            default_ix = int(movies[movies['title'] == st.session_state.last_choice].index[0])
-            
-        selected_movie = st.selectbox('Pick a movie:', movie_list, index=default_ix)
+        st.title("AI Recommender")
+        movie_titles = movies['title'].tolist()
+        try: d_idx = movie_titles.index(st.session_state.last_choice)
+        except: d_idx = 0
+        selected_movie = st.selectbox('Choose movie:', movie_titles, index=d_idx)
         
         c1, c2, c3 = st.columns(3)
         with c1:
-            if st.button('✨ Generate Match', use_container_width=True):
+            if st.button('✨ Recommend', use_container_width=True):
                 if rec_mode == "Content-Based":
                     idx = movies[movies['title'] == selected_movie].index[0]
                     dist = sorted(list(enumerate(similarity[idx])), reverse=True, key=lambda x: x[1])
@@ -227,32 +213,29 @@ else:
                     st.session_state.recs = [{'id': int(movies.sample().movie_id.iloc[0]), 'title': movies.sample().title.iloc[0]} for _ in range(6)]
                 st.session_state.last_choice = selected_movie
                 st.rerun()
-        
         with c2:
-            if st.button('❤️ Save to Favorites', use_container_width=True):
+            if st.button('❤️ Favorite', use_container_width=True):
                 m_data = movies[movies['title'] == selected_movie].iloc[0]
                 db.collection('favorites').document(st.session_state.u_id).collection('movies').document(str(m_data.movie_id)).set({'title': selected_movie, 'id': int(m_data.movie_id)})
                 st.toast("Saved!")
-
         with c3:
             if st.session_state.recs:
                 csv = pd.DataFrame(st.session_state.recs).to_csv(index=False).encode('utf-8')
-                st.download_button("📥 Export Recommendations", csv, "cine_recs.csv", "text/csv", use_container_width=True)
+                st.download_button("📥 Export", csv, "recs.csv", "text/csv", use_container_width=True)
 
         if st.session_state.recs:
             st.markdown(f"### Results for '{st.session_state.last_choice}'")
             cols_ai = st.columns(3)
             for i, item in enumerate(st.session_state.recs):
                 with cols_ai[i % 3]:
-                    poster = get_movie_details(item['id'])
-                    st.image(poster)
+                    st.image(get_movie_details(item['id']))
                     st.markdown(f"**{item['title']}**")
                     if st.button("Add to Watchlist", key=f"ai_{item['id']}"):
                         db.collection('watchlists').document(st.session_state.u_id).collection('movies').document(str(item['id'])).set({'title': item['title'], 'id': item['id']})
                         st.toast("Added!")
 
     with tab_watchlist:
-        st.title("Your Personal Watchlist")
+        st.title("My Watchlist")
         w_list = db.collection('watchlists').document(st.session_state.u_id).collection('movies').stream()
         for movie in w_list:
             m = movie.to_dict()
