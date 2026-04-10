@@ -57,7 +57,7 @@ def get_popular_ghana():
     url = f"https://api.themoviedb.org/3/movie/popular?api_key={TMDB_API_KEY}&region=GH"
     return requests.get(url).json().get('results', [])[:6]
 
-# --- 5. AUTHENTICATION UI ---
+# --- 5. AUTHENTICATION UI (UPDATED FOR FIRST-CLICK FIX) ---
 def apply_login_style():
     st.markdown("""
         <style>
@@ -82,24 +82,31 @@ def login_screen():
         st.markdown("<h1 style='text-align: center;'>🎬 CineMatch AI</h1>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #ccc;'>GROUP 6 PREMIUM SOLUTION</p>", unsafe_allow_html=True)
         t1, t2 = st.tabs(["🔐 Login", "📝 Sign Up"])
+        
         with t1:
             e = st.text_input("Email", placeholder="your@email.com", key="l_e")
             p = st.text_input("Password", type="password", key="l_p")
+            status_container = st.empty()
+            
             if st.button("SIGN IN", use_container_width=True):
                 with st.spinner("Authenticating..."):
                     firebase_web_api_key = "AIzaSyCyZ9aCtchLZyejKzTRjbSDnNp8uu9o1RI"
                     auth_url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={firebase_web_api_key}"
                     try:
-                        res = requests.post(auth_url, json={"email": e, "password": p, "returnSecureToken": True}, timeout=15)
+                        res = requests.post(auth_url, json={"email": e, "password": p, "returnSecureToken": True}, timeout=20)
                         if res.status_code == 200:
                             user_data = res.json()
-                            user_info = auth.get_user(user_data['localId'])
+                            # Immediate retrieval of correct display name
+                            user_record = auth.get_user(user_data['localId'])
                             st.session_state.user_auth = True
                             st.session_state.u_id = user_data['localId']
-                            st.session_state.u_name = user_info.display_name if user_info.display_name else e.split('@')[0]
+                            st.session_state.u_name = user_record.display_name if user_record.display_name else e.split('@')[0]
                             st.rerun()
-                        else: st.error("Invalid credentials.")
-                    except: st.warning("Connection lag. Please try again.")
+                        else:
+                            status_container.error("Invalid credentials. Please try again.")
+                    except:
+                        status_container.warning("Connection lag. Streamlining login...")
+                        st.rerun()
 
         with t2:
             ne, nu, np = st.text_input("Email", key="s_e"), st.text_input("Username", key="s_u"), st.text_input("Password", type="password", key="s_p")
@@ -124,35 +131,16 @@ if not st.session_state.user_auth:
 else:
     # --- SIDEBAR ---
     with st.sidebar:
-        try: st.image("logo.jpg", width=240)
+        try: st.image("logo.jpg", width=250)
         except: st.markdown("<h1 style='text-align: center;'>🎬</h1>", unsafe_allow_html=True)
         
         st.markdown("<h2 style='text-align: center; color: #E50914;'>GROUP 6 SOLUTION</h2>", unsafe_allow_html=True)
-        st.write(f"Welcome, **{st.session_state.u_name}**")
+        st.write(f"Welcome back, **{st.session_state.u_name}**")
         st.markdown("---")
         
-        # Theme & Strategy
-        theme = st.selectbox("Theme:", ["Netflix Dark", "Classic Light", "Ocean Blue"])
-        rec_mode = st.radio("AI Strategy:", ["Content-Based", "Collaborative"])
+        theme = st.selectbox("App Theme:", ["Netflix Dark", "Classic Light", "Ocean Blue"])
+        rec_mode = st.radio("AI Engine Mode:", ["Content-Based", "Collaborative"])
         
-        st.markdown("---")
-        # DATASET FILTER SECTION
-        st.subheader("🎯 Dataset Filter")
-        gen_list = ["All"] + sorted(movies['genre_label'].unique().tolist())
-        con_list = ["All"] + sorted(movies['country_label'].unique().tolist())
-        
-        sel_gen = st.selectbox("By Genre:", gen_list)
-        sel_con = st.selectbox("By Country:", con_list)
-        
-        # Filter logic for the search box
-        filtered_movies = movies.copy()
-        if sel_gen != "All":
-            filtered_movies = filtered_movies[filtered_movies['genre_label'] == sel_gen]
-        if sel_con != "All":
-            filtered_movies = filtered_movies[filtered_movies['country_label'] == sel_con]
-        
-        st.caption(f"Matches: {len(filtered_movies)}")
-
         st.markdown("---")
         if st.button("🚪 Sign Out", use_container_width=True):
             st.session_state.user_auth = False
@@ -163,17 +151,20 @@ else:
     bg, txt, btn = themes[theme]
     st.markdown(f"<style>.stApp {{ background: {bg}; color: {txt}; }} .stButton>button {{ background: {btn}; color: white; border-radius: 20px; }}</style>", unsafe_allow_html=True)
 
-    # --- TABS ---
-    tab_discovery, tab_ai, tab_watchlist = st.tabs(["🔥 Discovery", "🔍 AI Recommender", "🔖 Watchlist"])
+    # --- MAIN CONTENT TABS (5 TABS) ---
+    tab_discovery, tab_genres, tab_countries, tab_ai, tab_watchlist = st.tabs([
+        "🔥 Discovery", "🎭 Genres", "🌍 Countries", "🔍 AI Recommender", "🔖 Watchlist"
+    ])
 
     with tab_discovery:
-        st.title("Popular in Ghana 🇬🇭")
+        st.title("Top Global Picks")
+        st.subheader("Popular in Ghana 🇬🇭")
         gh_movies = get_popular_ghana()
         cols_gh = st.columns(6)
         for i, m in enumerate(gh_movies):
             with cols_gh[i]:
                 st.image(f"https://image.tmdb.org/t/p/w500{m['poster_path']}")
-                st.caption(m['title'])
+                st.caption(f"**{m['title']}**")
         
         st.markdown("---")
         st.subheader("Trending This Week")
@@ -182,16 +173,52 @@ else:
         for i, m in enumerate(tr_movies):
             with cols_tr[i]:
                 st.image(f"https://image.tmdb.org/t/p/w500{m['poster_path']}")
-                st.caption(m['title'])
+                st.caption(f"**{m['title']}**")
+
+    with tab_genres:
+        st.title("Browse by Genre")
+        g_list = sorted(movies['genre_label'].unique().tolist())
+        sel_g = st.selectbox("Select Genre:", g_list)
+        
+        filtered_g = movies[movies['genre_label'] == sel_g].head(24)
+        cols_g = st.columns(4)
+        for i, m in enumerate(filtered_g.to_dict('records')):
+            with cols_g[i % 4]:
+                poster = get_movie_details(m['movie_id'])
+                st.image(poster, use_container_width=True)
+                st.caption(f"**{m['title']}**")
+                if st.button("Analyze", key=f"gen_{m['movie_id']}"):
+                    st.session_state.last_choice = m['title']
+                    st.toast(f"Locked on: {m['title']}")
+
+    with tab_countries:
+        st.title("World Cinema")
+        c_list = sorted(movies['country_label'].unique().tolist())
+        sel_c = st.selectbox("Select Origin Country:", c_list)
+        
+        filtered_c = movies[movies['country_label'] == sel_c].head(24)
+        cols_c = st.columns(4)
+        for i, m in enumerate(filtered_c.to_dict('records')):
+            with cols_c[i % 4]:
+                poster = get_movie_details(m['movie_id'])
+                st.image(poster, use_container_width=True)
+                st.caption(f"**{m['title']}**")
+                if st.button("Analyze", key=f"con_{m['movie_id']}"):
+                    st.session_state.last_choice = m['title']
+                    st.toast(f"Locked on: {m['title']}")
 
     with tab_ai:
-        st.title("AI Recommender")
-        # Search box uses the filtered list from the sidebar
-        selected_movie = st.selectbox('Pick a movie you liked:', filtered_movies['title'].values)
+        st.title("AI Search & Recommendations")
+        movie_list = movies['title'].values
+        default_ix = 0
+        if st.session_state.last_choice in movie_list:
+            default_ix = int(movies[movies['title'] == st.session_state.last_choice].index[0])
+            
+        selected_movie = st.selectbox('Pick a movie:', movie_list, index=default_ix)
         
         c1, c2, c3 = st.columns(3)
         with c1:
-            if st.button('✨ Get Recommendations', use_container_width=True):
+            if st.button('✨ Generate Match', use_container_width=True):
                 if rec_mode == "Content-Based":
                     idx = movies[movies['title'] == selected_movie].index[0]
                     dist = sorted(list(enumerate(similarity[idx])), reverse=True, key=lambda x: x[1])
@@ -209,12 +236,11 @@ else:
 
         with c3:
             if st.session_state.recs:
-                df = pd.DataFrame(st.session_state.recs)
-                csv = df.to_csv(index=False).encode('utf-8')
-                st.download_button("📥 Export List", csv, "recs.csv", "text/csv", use_container_width=True)
+                csv = pd.DataFrame(st.session_state.recs).to_csv(index=False).encode('utf-8')
+                st.download_button("📥 Export Recommendations", csv, "cine_recs.csv", "text/csv", use_container_width=True)
 
         if st.session_state.recs:
-            st.markdown(f"### Results based on '{st.session_state.last_choice}'")
+            st.markdown(f"### Results for '{st.session_state.last_choice}'")
             cols_ai = st.columns(3)
             for i, item in enumerate(st.session_state.recs):
                 with cols_ai[i % 3]:
@@ -226,11 +252,11 @@ else:
                         st.toast("Added!")
 
     with tab_watchlist:
-        st.title("My Watchlist")
+        st.title("Your Personal Watchlist")
         w_list = db.collection('watchlists').document(st.session_state.u_id).collection('movies').stream()
         for movie in w_list:
             m = movie.to_dict()
-            col_w1, col_w2 = st.columns([4, 1])
+            col_w1, col_w2 = st.columns([5, 1])
             with col_w1: st.write(f"🎬 **{m['title']}**")
             with col_w2:
                 if st.button("🗑️", key=f"del_{m['id']}"):
