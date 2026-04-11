@@ -102,7 +102,7 @@ def login_screen():
                             })
                             st.rerun()
                         else: status_box.error("Invalid credentials.")
-                    except: st.rerun() # Immediate retry for first-click experience
+                    except: st.rerun() 
 
         with t2:
             ne, nu, np = st.text_input("Email", key="s_e"), st.text_input("Username", key="s_u"), st.text_input("Password", type="password", key="s_p")
@@ -117,7 +117,6 @@ def login_screen():
 def load_data():
     movies = pd.DataFrame(pickle.load(open('movie_dict.pkl', 'rb')))
     similarity = pickle.load(open('similarity.pkl', 'rb'))
-    # Ensure 'id' from Colab becomes 'movie_id' for the app logic
     if 'id' in movies.columns:
         movies.rename(columns={'id': 'movie_id'}, inplace=True)
     return movies, similarity
@@ -132,19 +131,43 @@ else:
         try: st.image("logo.jpg", width=250)
         except: st.markdown("<h1 style='text-align: center;'>🎬</h1>", unsafe_allow_html=True)
         st.markdown("<h2 style='text-align: center; color: #E50914;'>GROUP 6 SOLUTION</h2>", unsafe_allow_html=True)
-        st.write(f"Logged in as: **{st.session_state.u_name}**")
+        st.write(f"Welcome, **{st.session_state.u_name}**")
         st.markdown("---")
-        theme = st.selectbox("Theme:", ["Netflix Dark", "Classic Light", "Ocean Blue"])
-        rec_mode = st.radio("Strategy:", ["Content-Based", "Collaborative"])
+        
+        # UI SETTINGS
+        theme = st.selectbox("App Theme:", ["Netflix Dark", "Classic Light", "Ocean Blue"])
+        rec_mode = st.radio("AI Strategy:", ["Content-Based", "Collaborative"])
         st.markdown("---")
+
+        # 1. FAVORITES SECTION (RESTORED)
+        st.subheader("❤️ Favorites")
+        favs = db.collection('favorites').document(st.session_state.u_id).collection('movies').limit(5).stream()
+        has_favs = False
+        for f in favs:
+            has_favs = True
+            st.caption(f"⭐ {f.to_dict()['title']}")
+        if not has_favs:
+            st.caption("No favorites yet.")
+        st.markdown("---")
+
+        # 2. SEARCH HISTORY (RESTORED)
+        st.subheader("📜 Recent Search")
+        if st.session_state.last_choice:
+            st.caption(f"🔍 {st.session_state.last_choice}")
+        else:
+            st.caption("No history.")
+        st.markdown("---")
+
         if st.button("🚪 Sign Out", use_container_width=True):
             st.session_state.user_auth = False
             st.rerun()
 
+    # Theme Engine
     themes = {"Netflix Dark": ("#111", "white", "#E50914"), "Classic Light": ("white", "black", "#0078ff"), "Ocean Blue": ("#001f3f", "white", "#0074D9")}
     bg, txt, btn = themes[theme]
     st.markdown(f"<style>.stApp {{ background: {bg}; color: {txt}; }} .stButton>button {{ background: {btn}; color: white; border-radius: 20px; }}</style>", unsafe_allow_html=True)
 
+    # 5-Tab Interface
     tab_discovery, tab_genres, tab_countries, tab_ai, tab_watchlist = st.tabs([
         "🔥 Discovery", "🎭 Genres", "🌍 Countries", "🔍 AI Recommender", "🔖 Watchlist"
     ])
@@ -173,7 +196,6 @@ else:
         cols_g = st.columns(4)
         for i, m in enumerate(filtered_g.to_dict('records')):
             with cols_g[i % 4]:
-                # Safe ID check to prevent KeyError
                 m_id = m.get('movie_id') or m.get('id')
                 st.image(get_movie_details(m_id))
                 st.caption(m['title'])
@@ -209,14 +231,13 @@ else:
                 if rec_mode == "Content-Based":
                     idx = movies[movies['title'] == selected_movie].index[0]
                     dist = sorted(list(enumerate(similarity[idx])), reverse=True, key=lambda x: x[1])
-                    # Slicing exactly top 5 (indices 1-5)
                     st.session_state.recs = [{'id': int(movies.iloc[dist[i][0]].movie_id), 'title': movies.iloc[dist[i][0]].title} for i in range(1, 6)]
                 else:
                     st.session_state.recs = [{'id': int(movies.sample().movie_id.iloc[0]), 'title': movies.sample().title.iloc[0]} for _ in range(5)]
                 st.session_state.last_choice = selected_movie
                 st.rerun()
         with c2:
-            if st.button('❤️ Save to Favorites', use_container_width=True):
+            if st.button('❤️ Favorite', use_container_width=True):
                 m_data = movies[movies['title'] == selected_movie].iloc[0]
                 db.collection('favorites').document(st.session_state.u_id).collection('movies').document(str(m_data.movie_id)).set({'title': selected_movie, 'id': int(m_data.movie_id)})
                 st.toast("Saved!")
@@ -227,7 +248,6 @@ else:
 
         if st.session_state.recs:
             st.markdown(f"### Top 5 Results for '{st.session_state.last_choice}'")
-            # Using 5 columns for a clean side-by-side display
             cols_ai = st.columns(5)
             for i, item in enumerate(st.session_state.recs):
                 with cols_ai[i]:
