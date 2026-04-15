@@ -36,7 +36,10 @@ jsonschema-specifications==2025.9.1
 MarkupSafe==3.0.3
 msgpack==1.1.2
 narwhals==2.18.1
-numpy==2.4.4
+numpy<2.0
+scikit-learn
+scikit-surprise
+scipy
 packaging==26.0
 pandas==3.0.2
 pillow==12.2.0
