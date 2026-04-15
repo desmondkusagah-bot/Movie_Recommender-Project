@@ -57,7 +57,7 @@ def get_popular_ghana():
     url = f"https://api.themoviedb.org/3/movie/popular?api_key={TMDB_API_KEY}&region=GH"
     return requests.get(url).json().get('results', [])[:6]
 
-# --- 5. AUTHENTICATION UI (FIRST-CLICK FIX) ---
+# --- 5. AUTHENTICATION UI ---
 def apply_login_style():
     st.markdown("""
         <style>
@@ -112,16 +112,24 @@ def login_screen():
                     st.success(f"Account Created for {nu}! Please Login.")
                 except Exception as ex: st.error(ex)
 
-# --- 6. DATA LOADING (REPAIR KEYERRORS) ---
+# --- 6. DATA LOADING (INCLUDES SVD MODEL) ---
 @st.cache_resource(show_spinner=False)
 def load_data():
     movies = pd.DataFrame(pickle.load(open('movie_dict.pkl', 'rb')))
     similarity = pickle.load(open('similarity.pkl', 'rb'))
+    
+    # Load the Collaborative SVD Model
+    try:
+        svd_model = pickle.load(open('svd_model.pkl', 'rb'))
+    except FileNotFoundError:
+        svd_model = None
+        st.warning("Collaborative model (svd_model.pkl) not found. Using Fallback mode.")
+
     if 'id' in movies.columns:
         movies.rename(columns={'id': 'movie_id'}, inplace=True)
-    return movies, similarity
+    return movies, similarity, svd_model
 
-movies, similarity = load_data()
+movies, similarity, svd_model = load_data()
 
 # --- 7. MAIN APP LOGIC ---
 if not st.session_state.user_auth:
@@ -139,7 +147,7 @@ else:
         rec_mode = st.radio("AI Strategy:", ["Content-Based", "Collaborative"])
         st.markdown("---")
 
-        # 1. FAVORITES SECTION (RESTORED)
+        # FAVORITES SECTION
         st.subheader("❤️ Favorites")
         favs = db.collection('favorites').document(st.session_state.u_id).collection('movies').limit(5).stream()
         has_favs = False
@@ -148,14 +156,6 @@ else:
             st.caption(f"⭐ {f.to_dict()['title']}")
         if not has_favs:
             st.caption("No favorites yet.")
-        st.markdown("---")
-
-        # 2. SEARCH HISTORY (RESTORED)
-        st.subheader("📜 Recent Search")
-        if st.session_state.last_choice:
-            st.caption(f"🔍 {st.session_state.last_choice}")
-        else:
-            st.caption("No history.")
         st.markdown("---")
 
         if st.button("🚪 Sign Out", use_container_width=True):
@@ -167,7 +167,6 @@ else:
     bg, txt, btn = themes[theme]
     st.markdown(f"<style>.stApp {{ background: {bg}; color: {txt}; }} .stButton>button {{ background: {btn}; color: white; border-radius: 20px; }}</style>", unsafe_allow_html=True)
 
-    # 5-Tab Interface
     tab_discovery, tab_genres, tab_countries, tab_ai, tab_watchlist = st.tabs([
         "🔥 Discovery", "🎭 Genres", "🌍 Countries", "🔍 AI Recommender", "🔖 Watchlist"
     ])
@@ -223,39 +222,58 @@ else:
         movie_titles = movies['title'].tolist()
         try: d_idx = movie_titles.index(st.session_state.last_choice)
         except: d_idx = 0
-        selected_movie = st.selectbox('Choose movie:', movie_titles, index=d_idx)
+        selected_movie = st.selectbox('Choose movie reference:', movie_titles, index=d_idx)
         
         c1, c2, c3 = st.columns(3)
         with c1:
             if st.button('✨ Generate Top 5 Match', use_container_width=True):
+                # STRATEGY 1: CONTENT-BASED
                 if rec_mode == "Content-Based":
                     idx = movies[movies['title'] == selected_movie].index[0]
                     dist = sorted(list(enumerate(similarity[idx])), reverse=True, key=lambda x: x[1])
                     st.session_state.recs = [{'id': int(movies.iloc[dist[i][0]].movie_id), 'title': movies.iloc[dist[i][0]].title} for i in range(1, 6)]
+                
+                # STRATEGY 2: COLLABORATIVE (Using SVD)
                 else:
-                    st.session_state.recs = [{'id': int(movies.sample().movie_id.iloc[0]), 'title': movies.sample().title.iloc[0]} for _ in range(5)]
+                    if svd_model:
+                        # We predict ratings for 50 random movies for this User ID and show the highest predicted titles
+                        # Mapping the Firebase UID to an integer User ID for SVD
+                        numerical_uid = hash(st.session_state.u_id) % 1000
+                        movie_pool = movies.sample(50)
+                        preds = []
+                        for _, row in movie_pool.iterrows():
+                            est = svd_model.predict(numerical_uid, row['movie_id']).est
+                            preds.append({'id': row['movie_id'], 'title': row['title'], 'est': est})
+                        preds.sort(key=lambda x: x['est'], reverse=True)
+                        st.session_state.recs = [{'id': int(p['id']), 'title': p['title']} for p in preds[:5]]
+                    else:
+                        # Random Fallback if pkl is missing
+                        st.session_state.recs = [{'id': int(movies.sample().movie_id.iloc[0]), 'title': movies.sample().title.iloc[0]} for _ in range(5)]
+                
                 st.session_state.last_choice = selected_movie
                 st.rerun()
+        
         with c2:
             if st.button('❤️ Favorite', use_container_width=True):
                 m_data = movies[movies['title'] == selected_movie].iloc[0]
                 db.collection('favorites').document(st.session_state.u_id).collection('movies').document(str(m_data.movie_id)).set({'title': selected_movie, 'id': int(m_data.movie_id)})
-                st.toast("Saved!")
+                st.toast("Saved to Favorites!")
+        
         with c3:
             if st.session_state.recs:
                 csv = pd.DataFrame(st.session_state.recs).to_csv(index=False).encode('utf-8')
                 st.download_button("📥 Export List", csv, "top_5_recs.csv", "text/csv", use_container_width=True)
 
         if st.session_state.recs:
-            st.markdown(f"### Top 5 Results for '{st.session_state.last_choice}'")
+            st.markdown(f"### Results for you ({rec_mode})")
             cols_ai = st.columns(5)
             for i, item in enumerate(st.session_state.recs):
                 with cols_ai[i]:
                     st.image(get_movie_details(item['id']))
                     st.markdown(f"**{item['title']}**")
-                    if st.button("Add", key=f"ai_{item['id']}"):
+                    if st.button("Add to Watch", key=f"ai_{item['id']}"):
                         db.collection('watchlists').document(st.session_state.u_id).collection('movies').document(str(item['id'])).set({'title': item['title'], 'id': item['id']})
-                        st.toast("Added!")
+                        st.toast("Added to Watchlist!")
 
     with tab_watchlist:
         st.title("My Watchlist")
